@@ -1,4 +1,13 @@
-Hello world!
+DHCP Debug utility
+====
+
+This is a simple utility to help debug DHCP servers and their various options. You can use this tool like a client in a local subnet to check if a DHCP server is advertising what you expect.
+
+
+Rationale
+====
+
+Kea DHCP server doesn't support everything that it should in PfSense and often can result in hours of debugging when a simple tool could've shown you that the server just isn't showing any of the advertised features you expect it to be advertising. This tool fixes that by showing all the options in a semi-user-friendly way.
 
 License
 =====
