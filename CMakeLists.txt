@@ -57,6 +57,7 @@ target_include_directories(${PROJECT_NAME}
 	PUBLIC
 		# ${FMT_SOURCE_DIR}/include/fmt
 		${CMAKE_CURRENT_SOURCE_DIR}/include
+		${CMAKE_CURRENT_SOURCE_DIR}
 		${CMAKE_CURRENT_BINARY_DIR}
 )
 
@@ -70,4 +71,4 @@ set_target_properties(${PROJECT_NAME}
 
 if(${CMAKE_BUILD_TYPE} MATCHES "Release")
 	target_compile_definitions(${PROJECT_NAME} PRIVATE _FORTIFY_SOURCE=2 NDEBUG)
-else(${CMAKE_BUILD_TYPE} MATCHES "Release")
+endif(${CMAKE_BUILD_TYPE} MATCHES "Release")
