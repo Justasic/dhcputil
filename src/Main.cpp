@@ -1,7 +1,9 @@
 #include "vendor/CLI11.hpp"
 #include <asm-generic/socket.h>
+#include <cstring>
 #include <random>
 #include <string>
+#include <format>
 #include <cstdint>
 #include <cstdlib>
 #include <sys/socket.h>
@@ -117,7 +119,7 @@ public:
 
 */
 
-struct DHCPPacket
+struct __attribute__((packed)) DHCPPacket 
 {
 	uint8_t op;
 	uint8_t htype;
@@ -133,8 +135,17 @@ struct DHCPPacket
 	char chaddr[16];
 	char sname[64];
 	char file[128];
-	// Magic cookie, set to "99.130.83.99"
+	// Magic cookie, always set to "99.130.83.99"
 	uint32_t cookie;
+	// After this comes the options.
+};
+
+struct __attribute__((packed)) DHCPOption
+{
+	uint8_t option_id;
+	uint8_t option_len;
+	// data[1] is just to make warnings shush.
+	uint8_t data[1];
 };
 
 /**
@@ -173,7 +184,7 @@ struct DHCPPacket
 
 enum DHCPMessageType
 {
-	DHCPDISCOVER,
+	DHCPDISCOVER = 1,
 	DHCPOFFER, 
 	DHCPREQUEST,
 	DHCPACK,
@@ -189,24 +200,38 @@ union sockaddrs
 	struct sockaddr sa;
 };
 
-void print_mac(const struct sockaddr *sa) {
+void print_mac(const struct sockaddr *sa) 
+{
     if (sa->sa_family == AF_UNSPEC)
         return;
+
     const unsigned char *mac = reinterpret_cast<const unsigned char*>(sa->sa_data);
-    for (int i = 0; i < 6; ++i) {
-        std::printf("%02x", mac[i]);
+    for (int i = 0; i < 6; ++i) 
+	{
+        printf("%02x", mac[i]);
         if (i != 5)
             std::printf(":");
     }
-    std::cout << std::endl;
+	printf("\n");
 }
 
-
+std::string IPv4ToString(in_addr_t address)
+{
+    return std::format("{}.{}.{}.{}", 
+		(address      & 0xFF),
+		(address >> 8 & 0xFF),
+		(address >> 16 & 0xFF),
+        (address >> 24 & 0xFF)
+    );
+}
 int main(int argc, char* argv[]) 
 {
 	CommandLine cmdline;
 	if (int ret = cmdline.Parse(argc, argv); ret != 0)
 		return ret;
+
+	std::ostream_iterator<char> out(std::cout);
+	std::ostream_iterator<char> err(std::cerr);
 
 	int sock = socket(AF_INET, SOCK_DGRAM, 0);
 	if (sock == -1)
@@ -237,16 +262,29 @@ int main(int argc, char* argv[])
 		return EXIT_FAILURE;
 	}
 
+	// Get the interface IP address if available
+	struct ifreq ifaceip;
+	strcpy(ifaceip.ifr_name, ifr.ifr_name);
+	if (ioctl(sock, SIOCGIFADDR, &ifaceip) < 0)
+	{
+		// Set the IP address to 0
+		memset(&ifaceip, 0, sizeof(struct ifreq));
+		std::cout << "No address on " << ifr.ifr_name << ": " << strerror(errno) << std::endl;
+	}
+
 	// // Bind to 0.0.0.0:68
 	sockaddrs client;
 	client.in.sin_family = AF_INET;
 	client.in.sin_port = htons(68);
-	client.in.sin_addr.s_addr = 0x0;
+	client.in.sin_addr.s_addr = reinterpret_cast<struct sockaddr_in*>(&ifaceip.ifr_addr)->sin_addr.s_addr;
 	if (int res = bind(sock, &client.sa, sizeof(struct sockaddr)); res)
 	{
-		std::cerr << "Failed to bind to 0.0.0.0:68: " << strerror(errno) << std::endl;
+		std::cerr << "Failed to bind to " << ifr.ifr_name << " as " << IPv4ToString(client.in.sin_addr.s_addr) << ":" << 
+				ntohs(client.in.sin_port) << ": " << strerror(errno) << std::endl;
 		return EXIT_FAILURE;
 	}
+	
+	std::format_to(out, "Bound to {} as {}:{}", ifr.ifr_name, IPv4ToString(client.in.sin_addr.s_addr), ntohs(client.in.sin_port));
 
 	// Create a random device for getting random numbers.
 	std::random_device rd;
@@ -257,10 +295,12 @@ int main(int argc, char* argv[])
 	struct DHCPPacket *packet = reinterpret_cast<struct DHCPPacket*>(dhcp_packet);
 
 	packet->op = 0x1;            // DHCPREQUEST
+	packet->htype = 0x1;         // Ethernet Hardware Type
+	packet->hlen = 0x6;          // Hardware Address is our mac address, always 6 bytes long.
 	packet->xid = distrib(gen);  // Client ID
-	packet->flags &= 0x8000;     // Set broadcast flag
-	packet->ciaddr = 0;          // 0.0.0.0
-	packet->siaddr = 0xFFFFFFFF; // Send to 255.255.255.255
+	packet->flags = htons(1 << 15);    // Set broadcast flag
+	packet->ciaddr = client.in.sin_addr.s_addr; // Set client address (either the current known address or 0.0.0.0)
+	packet->cookie = 0x63538263; // Set the cookie, note this is written in little-endian but compiled to big-endian
 	memcpy(packet->chaddr, ifr.ifr_hwaddr.sa_data, 6); // Copy mac address in.
 
 	print_mac(&ifr.ifr_hwaddr);
@@ -273,13 +313,26 @@ int main(int argc, char* argv[])
             std::cout << "\n" << " | ";
         }
 	}
-	std:: cout << std::endl;
+	std::cout << std::endl;
+
+	// So, this is a bit fun, basically this is some pointer mafs to get the DHCP option array position
+	// in the memory space, allowing us to set some basic options.
+	struct DHCPOption *optionstart = reinterpret_cast<struct DHCPOption*>(dhcp_packet + sizeof(struct DHCPPacket));
+	optionstart->option_id = 53;        // Option ID for DHCP request message type
+	optionstart->option_len = 1;        // we're 1 byte big
+	optionstart->data[0] = DHCPREQUEST; // DHCP Request?
+	optionstart++; // lmao next struct!
+	optionstart->option_id = 0xFF; // Option End byte.
     
+	// Calculate our packet length.
+	size_t len = (reinterpret_cast<uint8_t*>(optionstart) + 1) - dhcp_packet;
+	printf("Length of packet: %zu\n", len);
+
 	sockaddrs sa;
 	sa.in.sin_family = AF_INET;
 	sa.in.sin_port = htons(67);
 	sa.in.sin_addr.s_addr = 0xFFFFFFFF;
-	ssize_t written = sendto(sock, dhcp_packet, sizeof(dhcp_packet), 0, &sa.sa, sizeof(struct sockaddr_in));
+	ssize_t written = sendto(sock, dhcp_packet, len, 0, &sa.sa, sizeof(struct sockaddr_in));
 
 	if (written < 0)
 	{
