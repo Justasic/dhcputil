@@ -18,7 +18,8 @@
 
 bool DHCPSessionSocket::SetSocketOption(int option, bool state)
 {
-	if (setsockopt(this->sock_, SOL_SOCKET, option, &state, sizeof(state)) < 0)
+	int s = state;
+	if (setsockopt(this->sock_, SOL_SOCKET, option, &s, sizeof(s)) < 0)
 	{
 		perror("setsockopt");
 		return false;
@@ -34,8 +35,11 @@ int DHCPSessionSocket::OpenInterface(std::string iface)
 
 	// Set that we're a broadcast socket capable of sending to 
 	// 255.255.255.255 and such
-	if (this->SetSocketOption(SO_BROADCAST, true))
+	if (!this->SetSocketOption(SO_BROADCAST, true))
+	{
+		std::cerr << "Failed to set the socket to a broadcast IP capable socket" << std::endl;
 		return errno;
+	}
 
 	// Move our interface name copy into ourselves
 	this->interface_ = std::move(iface);
@@ -53,8 +57,11 @@ int DHCPSessionSocket::OpenInterface(std::string iface)
 	memcpy(this->hardware_id_.data(), ifr.ifr_hwaddr.sa_data, 6);
 
 	// Bind to this specific ethernet device.
-	if (this->SetSocketOption(SO_BINDTODEVICE, this->interface_))
+	if (!this->SetSocketOption(SO_BINDTODEVICE, this->interface_))
+	{
+		std::cerr << "Failed to bind to device " << this->interface_ <<std::endl;
 		return errno;
+	}
 
 	// Get the interface IP address if available
 	struct ifreq ifaceip;

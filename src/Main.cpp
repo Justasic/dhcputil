@@ -113,7 +113,7 @@ int main(int argc, char* argv[])
 	}
 
 	// Bind to the interface address on port 68 (as client)
-	if (!sock.BindSocket(sock.GetInterfaceAddress(), 68))
+	if (!sock.BindSocket(INADDR_ANY, 68))
 	{
 		perror("bind");
 		return EXIT_FAILURE;
@@ -156,6 +156,19 @@ int main(int argc, char* argv[])
 	}
 
 	std::cerr << "Wrote " << written << " bytes!" << std::endl;
+
+	std::vector<uint8_t> buffer;
+	// According to AI this is the average DHCP packet size.
+	buffer.reserve(579); 
+
+	ssize_t readdata = sock.Recieve(INADDR_BROADCAST, 68, buffer);
+	if (readdata < 0)
+	{
+		perror("recvfrom");
+		return EXIT_FAILURE;
+	}
+
+	printf("Received %d bytes of data!\n", buffer.size());
 
 
 	return EXIT_SUCCESS;

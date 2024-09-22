@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <format>
 #include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 
 union sockaddrs
@@ -137,7 +138,7 @@ public:
 
 	template <std::ranges::range Range> 
 		requires std::convertible_to<std::ranges::range_value_t<std::remove_cvref_t<Range>>, uint8_t>
-	ssize_t Send(in_addr_t ipaddr, in_addr_t port, Range &&data)
+	ssize_t Send(in_addr_t ipaddr, in_port_t port, Range &&data)
 	{
 		sockaddrs sa;
 		sa.in.sin_family = AF_INET;
@@ -152,7 +153,7 @@ public:
 
 	template <std::ranges::range Range> 
 		requires std::convertible_to<std::ranges::range_value_t<std::remove_cvref_t<Range>>, uint8_t>
-	ssize_t Send(std::string_view ipaddr, in_addr_t port, Range &&data)
+	ssize_t Send(std::string_view ipaddr, in_port_t port, Range &&data)
 	{
 		auto address = ToIPv4(ipaddr);
 		if (!address)
@@ -162,5 +163,33 @@ public:
 		}
 
 		return this->Send(*address, port, std::move(data));
+	}
+
+
+	ssize_t Recieve(in_addr_t ipaddr, in_port_t port, std::vector<uint8_t> &buf)
+	{
+		// Sockaddr to know who we received data from
+		sockaddrs sa;
+		socklen_t slen = sizeof(struct sockaddr_in);
+
+		ssize_t datasz = recvfrom(this->sock_, buf.data(), buf.capacity(), 0, &sa.sa, &slen);
+
+		if (datasz < 0)
+			return datasz;
+		else if (datasz == buf.capacity())
+		{
+			// Expand the buffer and re-read data.
+			buf.reserve(buf.capacity()*2);
+			ssize_t moredatasz = recvfrom(this->sock_, buf.data()+datasz, buf.capacity(), 0, &sa.sa, &slen);
+			if (moredatasz < 0)
+				return moredatasz;
+
+			datasz += moredatasz;
+		}
+
+		// Inform the vector of it's element size now.
+		buf.resize(datasz);
+
+		return datasz;
 	}
 };
