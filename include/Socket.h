@@ -91,9 +91,11 @@ public:
 
 	// Can be moved
 	constexpr DHCPSessionSocket(DHCPSessionSocket &&rhs) noexcept : 
-		sock_(rhs.sock_), interface_(std::move(rhs.interface_))
+		sock_(rhs.sock_), interface_(std::move(rhs.interface_)), interface_ip_(rhs.interface_ip_),
+		hardware_id_(std::move(rhs.hardware_id_))
 	{ 
 		rhs.sock_ = -1; 
+		rhs.interface_ip_ = 0;
 	}
 
 	constexpr DHCPSessionSocket &operator=(DHCPSessionSocket &&rhs) noexcept
@@ -103,9 +105,13 @@ public:
 
 		// Move/copy data
 		this->sock_ = rhs.sock_;
+		this->interface_ = std::move(rhs.interface_);
+		this->interface_ip_ = rhs.interface_ip_;
+		this->hardware_id_ = std::move(rhs.hardware_id_);
 
 		// Reset stuff that cannot be moved back to sane values.
 		rhs.sock_ = -1;
+		rhs.interface_ip_ = 0;
 
 		return *this;
 	}
@@ -164,7 +170,6 @@ public:
 
 		return this->Send(*address, port, std::move(data));
 	}
-
 
 	ssize_t Recieve(in_addr_t ipaddr, in_port_t port, std::vector<uint8_t> &buf)
 	{

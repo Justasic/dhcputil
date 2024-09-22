@@ -14,6 +14,12 @@
 #include "DHCP.h"
 #include "Socket.h"
 
+// Reference information
+// https://networkencyclopedia.com/dhcp-options/
+// https://datatracker.ietf.org/doc/html/rfc2131
+// https://datatracker.ietf.org/doc/html/rfc2132
+// https://www.man7.org/linux/man-pages/man7/netdevice.7.html
+
 class CommandLine
 {
 public:
@@ -119,35 +125,20 @@ int main(int argc, char* argv[])
 		return EXIT_FAILURE;
 	}
 
-	// Build out the DHCP packet
+	DHCPPayload payload;
 
-	uint8_t dhcp_packet[300]{0};
-	struct DHCPPacket *packet = reinterpret_cast<struct DHCPPacket*>(dhcp_packet);
+	struct DHCPPacket *packet_ = payload.GetDHCPPakcetStructure();
 
-	packet->op = BOOTREQUEST;    // DHCPREQUEST
-	packet->htype = 0x1;         // Ethernet Hardware Type
-	packet->hlen = 0x6;          // Hardware Address is our mac address, always 6 bytes long.
-	packet->xid = cmdline.xid;   // Client ID
-	packet->flags = htons(cmdline.flags);    // Set broadcast flag
-	packet->ciaddr = sock.GetInterfaceAddress(); // Set client address (either the current known address or 0.0.0.0)
-	packet->cookie = DHCP_COOKIE; // Set the cookie, note this is written in little-endian but compiled to big-endian
-	memcpy(packet->chaddr, sock.GetInterfaceHWID().data(), 6); // Copy mac address in.
+	packet_->hlen   = 6;
+	packet_->xid    = cmdline.xid;
+	packet_->flags  = htons(cmdline.flags);
+	packet_->ciaddr = sock.GetInterfaceAddress();
+	memcpy(packet_->chaddr, sock.GetInterfaceHWID().data(), packet_->hlen);
 
-	// So, this is a bit fun, basically this is some pointer mafs to get the DHCP option array position
-	// in the memory space, allowing us to set some basic options.
-	struct DHCPOption *optionstart = reinterpret_cast<struct DHCPOption*>(dhcp_packet + sizeof(struct DHCPPacket));
-	optionstart->option_id = 53;        // Option ID for DHCP request message type
-	optionstart->option_len = 1;        // we're 1 byte big
-	optionstart->data[0] = cmdline.mtype; // DHCP Request?
-	optionstart++; // lmao next struct!
-	optionstart->option_id = 0xFF; // Option End byte.
-    
-	// Calculate our packet length.
-	size_t len = (reinterpret_cast<uint8_t*>(optionstart) + 1) - dhcp_packet;
-	printf("Length of packet: %zu\n", len);
-
+	payload.AddOption(53, cmdline.mtype);
+	
 	// Send out the broadcast socket.
-	ssize_t written = sock.Send(INADDR_BROADCAST, 67, dhcp_packet);
+	ssize_t written = sock.Send(INADDR_BROADCAST, 67, payload.GetStructureData());
 
 	if (written < 0)
 	{

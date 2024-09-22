@@ -1,5 +1,8 @@
 #pragma once
 #include <cstdint>
+#include <vector>
+#include <ranges>
+#include "DHCP.h"
 
 // Always set to 99.130.83.99
 #define DHCP_COOKIE 0x63538263
@@ -117,4 +120,88 @@ enum DHCPMessageOperation
 {
 	BOOTREQUEST = 1,
 	BOOTREPLY
+};
+
+class DHCPPayload
+{
+	// The actual data structure.
+	std::vector<uint8_t> structuredata_;
+
+	// The DHCP packet structure at the front of the above array.
+	struct DHCPPacket *packet_;
+
+	// a list of options instantiated inside this structure
+	std::vector<struct DHCPOption*> options_;
+
+public:
+	DHCPPayload()
+	{
+		// Allocate the packet structure.
+		structuredata_.resize(sizeof(struct DHCPPacket));
+		this->packet_ = reinterpret_cast<struct DHCPPacket*>(this->structuredata_.data());
+
+		// Set some basic data we're almost always going to have.
+		this->packet_->op = BOOTREQUEST;
+		this->packet_->htype = 0x1; // Ethernet hardware type.
+		this->packet_->cookie = DHCP_COOKIE;
+	}
+
+	// Not copyable
+	DHCPPayload(const DHCPPayload &) = delete;
+	DHCPPayload &operator=(const DHCPPayload &) = delete;
+
+	struct DHCPPacket *GetDHCPPakcetStructure() { return this->packet_; }
+
+	// This returns the structured data and resets the structure.
+	std::vector<uint8_t> &&GetStructureData()
+	{
+		// Insert the "End of Options" option byte.
+		this->structuredata_.emplace_back(0xFF);
+		// Move the data out of the function and this class entirely.
+		return std::move(this->structuredata_);
+	}
+
+	// Add options to an array for later.
+	template <std::ranges::range Range> 
+		requires std::convertible_to<std::ranges::range_value_t<std::remove_cvref_t<Range>>, uint8_t>
+	void AddOption(uint8_t id, Range &&data)
+	{
+		size_t length = std::ranges::size(data);
+		const auto *ptr = std::ranges::cdata(data);
+
+		// Because we got a pointer to the end of the data, we now need to 
+		// allocate space inside the vector for the structure we're about to add.
+		this->structuredata_.resize(this->structuredata_.size() + sizeof(struct DHCPOption) + length);
+
+		// Get a pointer to the structure.
+struct DHCPOption *opt = reinterpret_cast<struct DHCPOption*>(this->structuredata_.data() + this->structuredata_.size() - (length + sizeof(struct DHCPOption) - 1));
+
+		// Now we can set the values.
+		opt->option_id = id;
+		opt->option_len = static_cast<decltype(opt->option_len)>(length);
+		memcpy(opt->data, ptr, opt->option_len);
+
+		// Add the option to the option array for later.
+		this->options_.emplace_back(opt);
+	}
+
+	void AddOption(uint8_t id, uint8_t type)
+	{
+		// Because we got a pointer to the end of the data, we now need to 
+		// allocate space inside the vector for the structure we're about to add.
+		this->structuredata_.resize(this->structuredata_.size() + sizeof(struct DHCPOption));
+
+		// Get a pointer to the structure.
+		struct DHCPOption *opt = reinterpret_cast<struct DHCPOption*>(this->structuredata_.data() + this->structuredata_.size() - sizeof(struct DHCPOption));
+
+		printf("New structure size %d\n", this->structuredata_.size());
+
+		// Now we can set the values.
+		opt->option_id = id;
+		opt->option_len = 1;
+		opt->data[0] = type;
+
+		// Add the option to the option array for later.
+		this->options_.emplace_back(opt);
+	}
 };
