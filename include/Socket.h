@@ -171,30 +171,5 @@ public:
 		return this->Send(*address, port, std::move(data));
 	}
 
-	ssize_t Recieve(in_addr_t ipaddr, in_port_t port, std::vector<uint8_t> &buf)
-	{
-		// Sockaddr to know who we received data from
-		sockaddrs sa;
-		socklen_t slen = sizeof(struct sockaddr_in);
-
-		ssize_t datasz = recvfrom(this->sock_, buf.data(), buf.capacity(), 0, &sa.sa, &slen);
-
-		if (datasz < 0)
-			return datasz;
-		else if (datasz == buf.capacity())
-		{
-			// Expand the buffer and re-read data.
-			buf.reserve(buf.capacity()*2);
-			ssize_t moredatasz = recvfrom(this->sock_, buf.data()+datasz, buf.capacity(), 0, &sa.sa, &slen);
-			if (moredatasz < 0)
-				return moredatasz;
-
-			datasz += moredatasz;
-		}
-
-		// Inform the vector of it's element size now.
-		buf.resize(datasz);
-
-		return datasz;
-	}
+	ssize_t Recieve(in_addr_t ipaddr, in_port_t port, std::vector<uint8_t> &buf);
 };
